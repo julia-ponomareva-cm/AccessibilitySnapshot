@@ -45,20 +45,24 @@ extension Snapshotting where Value == UIView, Format == UIImage {
     /// - parameter showUserInputLabels: Controls when to show elements' accessibility user input labels (used by Voice
     /// Control).
     /// - parameter shouldRunInHostApplication: Controls whether a host application is required to run the test or not.
+    /// - parameter perceptualPrecision: The percentage a pixel must match the source pixel to be considered a match.
+    /// Value must be in the range `[0,1]`, where `0` means no difference allowed and `1` means any two colors are
+    /// considered identical. Defaults to `1`.
     public static func accessibilityImage(
         showActivationPoints activationPointDisplayMode: ActivationPointDisplayMode = .whenOverridden,
         useMonochromeSnapshot: Bool = true,
         drawHierarchyInKeyWindow: Bool = false,
         markerColors: [UIColor] = [],
         showUserInputLabels: Bool = true,
-        shouldRunInHostApplication: Bool = true
+        shouldRunInHostApplication: Bool = true,
+        perceptualPrecision: Float = 1
     ) -> Snapshotting {
         guard !shouldRunInHostApplication || isRunningInHostApplication else {
             fatalError("Accessibility snapshot tests cannot be run in a test target without a host application")
         }
 
         return Snapshotting<UIView, UIImage>
-            .image(drawHierarchyInKeyWindow: drawHierarchyInKeyWindow)
+            .image(drawHierarchyInKeyWindow: drawHierarchyInKeyWindow, precision: perceptualPrecision)
             .pullback { view in
                 let containerView = AccessibilitySnapshotView(
                     containedView: view,
@@ -181,10 +185,14 @@ extension Snapshotting where Value == UIView, Format == UIImage {
         maxPermissibleMissedRegionWidth: CGFloat = 0,
         maxPermissibleMissedRegionHeight: CGFloat = 0,
         file: StaticString = #file,
-        line: UInt = #line
+        line: UInt = #line,
+        perceptualPrecision: Float = 1
     ) -> Snapshotting {
         return Snapshotting<UIView, UIImage>
-            .image(drawHierarchyInKeyWindow: drawHierarchyInKeyWindow)
+            .image(
+                drawHierarchyInKeyWindow: drawHierarchyInKeyWindow,
+                precision: perceptualPrecision
+            )
             .pullback { view in
                 do {
                     return try HitTargetSnapshotView(
@@ -254,13 +262,18 @@ extension Snapshotting where Value == UIViewController, Format == UIImage {
     /// - parameter markerColors: The array of colors which will be chosen from when creating the overlays.
     /// - parameter showUserInputLabels: Controls when to show elements' accessibility user input labels (used by Voice
     /// Control).
+    /// - parameter shouldRunInHostApplication: Controls whether a host application is required to run the test or not.
+    /// - parameter perceptualPrecision: The percentage a pixel must match the source pixel to be considered a match.
+    /// Value must be in the range `[0,1]`, where `0` means no difference allowed and `1` means any two colors are
+    /// considered identical. Defaults to `1`.
     public static func accessibilityImage(
         showActivationPoints activationPointDisplayMode: ActivationPointDisplayMode = .whenOverridden,
         useMonochromeSnapshot: Bool = true,
         drawHierarchyInKeyWindow: Bool = false,
         markerColors: [UIColor] = [],
         showUserInputLabels: Bool = true,
-        shouldRunInHostApplication: Bool = true
+        shouldRunInHostApplication: Bool = true,
+        perceptualPrecision: Float = 1
     ) -> Snapshotting {
         return Snapshotting<UIView, UIImage>
             .accessibilityImage(
@@ -269,7 +282,8 @@ extension Snapshotting where Value == UIViewController, Format == UIImage {
                 drawHierarchyInKeyWindow: drawHierarchyInKeyWindow,
                 markerColors: markerColors,
                 showUserInputLabels: showUserInputLabels,
-                shouldRunInHostApplication: shouldRunInHostApplication
+                shouldRunInHostApplication: shouldRunInHostApplication,
+                perceptualPrecision: perceptualPrecision
             )
             .pullback { viewController in
                 viewController.view
@@ -300,12 +314,16 @@ extension Snapshotting where Value == UIViewController, Format == UIImage {
     /// repeating through the array as necessary and avoiding adjacent regions using the same color when possible.
     /// - parameter file: The file in which errors should be attributed.
     /// - parameter line: The line in which errors should be attributed.
+    /// - parameter perceptualPrecision: The percentage a pixel must match the source pixel to be considered a match.
+    /// Value must be in the range `[0,1]`, where `0` means no difference allowed and `1` means any two colors are
+    /// considered identical. Defaults to `1`.
     public static func imageWithHitTargets(
         useMonochromeSnapshot: Bool = true,
         drawHierarchyInKeyWindow: Bool = false,
         colors: [UIColor] = AccessibilitySnapshotView.defaultMarkerColors,
         file: StaticString = #file,
-        line: UInt = #line
+        line: UInt = #line,
+        perceptualPrecision: Float = 1
     ) -> Snapshotting {
         return Snapshotting<UIView, UIImage>
             .imageWithHitTargets(
@@ -313,7 +331,8 @@ extension Snapshotting where Value == UIViewController, Format == UIImage {
                 drawHierarchyInKeyWindow: drawHierarchyInKeyWindow,
                 colors: colors,
                 file: file,
-                line: line
+                line: line,
+                perceptualPrecision: perceptualPrecision
             )
             .pullback { viewController in
                 viewController.view
