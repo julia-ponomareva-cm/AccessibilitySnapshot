@@ -195,7 +195,7 @@ public extension Snapshotting where Value == UIView, Format == UIImage {
                             )
                             imageSnapshotting.snapshot(containerView).run { image in
                                 Task { @MainActor in
-                                    lease.release()
+                                    defer { lease.release() }
                                     callback(image)
                                 }
                             }
