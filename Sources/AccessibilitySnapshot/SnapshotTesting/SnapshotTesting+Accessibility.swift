@@ -1,9 +1,101 @@
 import AccessibilitySnapshotCore
 import AccessibilitySnapshotParser
 import AccessibilitySnapshotParser_ObjC
-import SnapshotTesting
 import AccessibilitySnapshotPreviews
+import QuartzCore
+import SnapshotTesting
 import UIKit
+
+@MainActor
+private final class AccessibilitySnapshotCaptureCoordinator {
+    static let shared = AccessibilitySnapshotCaptureCoordinator()
+
+    private let window = UIWindow(frame: UIScreen.main.bounds)
+    private var activeCaptureCount = 0
+    private var previousKeyWindow: UIWindow?
+
+    func capture(
+        _ containerView: AccessibilitySnapshotBaseView,
+        drawHierarchyInKeyWindow: Bool,
+        completion: @escaping (UIImage) -> Void
+    ) {
+        beginCapture(of: containerView)
+        defer { finishCapture(of: containerView) }
+
+        // SwiftUI publishes parts of its accessibility hierarchy on the next main run-loop turn.
+        RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.001))
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        CATransaction.flush()
+
+        do {
+            try containerView.parseAccessibility()
+        } catch ImageRenderingError.containedViewExceedsMaximumSize {
+            fatalError(
+                """
+                View is too large to render monochrome snapshot. Try setting useMonochromeSnapshot to false or \
+                use a different iOS version. In particular, this is known to fail on iOS 13, but was fixed in \
+                iOS 14.
+                """
+            )
+        } catch ImageRenderingError.containedViewHasUnsupportedTransform {
+            fatalError(
+                """
+                View has an unsupported transform for the specified snapshot parameters. Try using an identity \
+                transform or changing the view rendering mode to render the layer in the graphics context.
+                """
+            )
+        } catch {
+            fatalError("Failed to render snapshot image")
+        }
+
+        containerView.sizeToFit()
+        containerView.setNeedsLayout()
+        containerView.layoutIfNeeded()
+        CATransaction.flush()
+
+        let renderer = UIGraphicsImageRenderer(bounds: containerView.bounds)
+        let image = renderer.image { context in
+            if drawHierarchyInKeyWindow {
+                containerView.drawHierarchy(in: containerView.bounds, afterScreenUpdates: true)
+            } else {
+                containerView.layer.render(in: context.cgContext)
+            }
+        }
+
+        completion(image)
+    }
+
+    private func beginCapture(of containerView: UIView) {
+        if activeCaptureCount == 0 {
+            previousKeyWindow = UIApplication.shared.firstKeyWindow
+        }
+        activeCaptureCount += 1
+
+        window.frame = UIScreen.main.bounds
+        window.makeKeyAndVisible()
+        containerView.center = window.center
+        window.addSubview(containerView)
+        window.layoutIfNeeded()
+        CATransaction.flush()
+    }
+
+    private func finishCapture(of containerView: UIView) {
+        containerView.removeFromSuperview()
+        activeCaptureCount -= 1
+
+        guard activeCaptureCount == 0 else { return }
+
+        if let previousKeyWindow, previousKeyWindow !== window {
+            previousKeyWindow.makeKeyAndVisible()
+        } else {
+            window.resignKey()
+        }
+
+        previousKeyWindow = nil
+        window.isHidden = true
+    }
+}
 
 public extension Snapshotting where Value == UIView, Format == UIImage {
     /// Snapshots the current view with colored overlays of each accessibility element it contains, as well as an
@@ -48,67 +140,61 @@ public extension Snapshotting where Value == UIView, Format == UIImage {
             fatalError("Accessibility snapshot tests cannot be run in a test target without a host application")
         }
 
-        return Snapshotting<UIView, UIImage>
-            .image(drawHierarchyInKeyWindow: drawHierarchyInKeyWindow, precision: precision, perceptualPrecision: perceptualPrecision)
-            .pullback { view in
+        let imageSnapshotting = Snapshotting<UIView, UIImage>.image(
+            drawHierarchyInKeyWindow: drawHierarchyInKeyWindow,
+            precision: precision,
+            perceptualPrecision: perceptualPrecision
+        )
 
-                let configuration = AccessibilitySnapshotConfiguration(
-                    viewRenderingMode: drawHierarchyInKeyWindow ? .drawHierarchyInRect : .renderLayerInContext,
-                    colorRenderingMode: useMonochromeSnapshot ? .monochrome : .fullColor,
-                    overlayColors: markerColors,
-                    activationPointDisplay: activationPointDisplayMode,
-                    includesInputLabels: showUserInputLabels ? .whenOverridden : .never
-                )
-
-                let containerView: AccessibilitySnapshotBaseView
-
-                switch layoutEngine {
-                case .uikit:
-                    containerView = AccessibilitySnapshotView(
-                        containedView: view,
-                        snapshotConfiguration: configuration
+        return Snapshotting<UIView, UIImage>(
+            pathExtension: imageSnapshotting.pathExtension,
+            diffing: imageSnapshotting.diffing
+        ) { view in
+            Async { callback in
+                let beginCapture: @MainActor () -> Void = {
+                    let configuration = AccessibilitySnapshotConfiguration(
+                        viewRenderingMode: drawHierarchyInKeyWindow ? .drawHierarchyInRect : .renderLayerInContext,
+                        colorRenderingMode: useMonochromeSnapshot ? .monochrome : .fullColor,
+                        overlayColors: markerColors,
+                        activationPointDisplay: activationPointDisplayMode,
+                        includesInputLabels: showUserInputLabels ? .whenOverridden : .never
                     )
 
-                case .swiftui:
-                    guard #available(iOS 16.0, *) else {
-                        fatalError("SwiftUI layout engine requires iOS 16.0 or later")
+                    let containerView: AccessibilitySnapshotBaseView
+
+                    switch layoutEngine {
+                    case .uikit:
+                        containerView = AccessibilitySnapshotView(
+                            containedView: view,
+                            snapshotConfiguration: configuration
+                        )
+
+                    case .swiftui:
+                        guard #available(iOS 16.0, *) else {
+                            fatalError("SwiftUI layout engine requires iOS 16.0 or later")
+                        }
+                        containerView = SwiftUIAccessibilitySnapshotContainerView(
+                            containedView: view,
+                            snapshotConfiguration: configuration
+                        )
                     }
-                    containerView = SwiftUIAccessibilitySnapshotContainerView(
-                        containedView: view,
-                        snapshotConfiguration: configuration
+
+                    AccessibilitySnapshotCaptureCoordinator.shared.capture(
+                        containerView,
+                        drawHierarchyInKeyWindow: drawHierarchyInKeyWindow,
+                        completion: callback
                     )
                 }
 
-                let window = UIWindow(frame: UIScreen.main.bounds)
-                window.makeKeyAndVisible()
-                containerView.center = window.center
-                window.addSubview(containerView)
-
-                do {
-                    try containerView.parseAccessibility()
-                } catch ImageRenderingError.containedViewExceedsMaximumSize {
-                    fatalError(
-                        """
-                        View is too large to render monochrome snapshot. Try setting useMonochromeSnapshot to false or \
-                        use a different iOS version. In particular, this is known to fail on iOS 13, but was fixed in \
-                        iOS 14.
-                        """
-                    )
-                } catch ImageRenderingError.containedViewHasUnsupportedTransform {
-                    fatalError(
-                        """
-                        View has an unsupported transform for the specified snapshot parameters. Try using an identity \
-                        transform or changing the view rendering mode to render the layer in the graphics context.
-                        """
-                    )
-                } catch {
-                    fatalError("Failed to render snapshot image")
+                // SnapshotTesting synchronously waits for the callback. Starting a Task from an @MainActor test would
+                // deadlock behind that wait, so enter the actor immediately when already on its backing thread.
+                if Thread.isMainThread {
+                    MainActor.assumeIsolated(beginCapture)
+                } else {
+                    DispatchQueue.main.async(execute: beginCapture)
                 }
-
-                containerView.sizeToFit()
-
-                return containerView
             }
+        }
     }
 
     /// Snapshots the current view simulating the way it will appear with Smart Invert Colors enabled.
