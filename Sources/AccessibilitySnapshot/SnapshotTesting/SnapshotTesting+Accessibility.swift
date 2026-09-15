@@ -20,51 +20,50 @@ private final class AccessibilitySnapshotCaptureCoordinator {
         completion: @escaping (UIImage) -> Void
     ) {
         beginCapture(of: containerView)
+        defer { finishCapture(of: containerView) }
 
         // SwiftUI publishes parts of its accessibility hierarchy on the next main run-loop turn.
-        DispatchQueue.main.async { [self] in
-            window.makeKeyAndVisible()
-            window.layoutIfNeeded()
-            CATransaction.flush()
+        RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.001))
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        CATransaction.flush()
 
-            do {
-                try containerView.parseAccessibility()
-            } catch ImageRenderingError.containedViewExceedsMaximumSize {
-                fatalError(
-                    """
-                    View is too large to render monochrome snapshot. Try setting useMonochromeSnapshot to false or \
-                    use a different iOS version. In particular, this is known to fail on iOS 13, but was fixed in \
-                    iOS 14.
-                    """
-                )
-            } catch ImageRenderingError.containedViewHasUnsupportedTransform {
-                fatalError(
-                    """
-                    View has an unsupported transform for the specified snapshot parameters. Try using an identity \
-                    transform or changing the view rendering mode to render the layer in the graphics context.
-                    """
-                )
-            } catch {
-                fatalError("Failed to render snapshot image")
-            }
-
-            containerView.sizeToFit()
-            containerView.setNeedsLayout()
-            containerView.layoutIfNeeded()
-            CATransaction.flush()
-
-            let renderer = UIGraphicsImageRenderer(bounds: containerView.bounds)
-            let image = renderer.image { context in
-                if drawHierarchyInKeyWindow {
-                    containerView.drawHierarchy(in: containerView.bounds, afterScreenUpdates: true)
-                } else {
-                    containerView.layer.render(in: context.cgContext)
-                }
-            }
-
-            defer { finishCapture(of: containerView) }
-            completion(image)
+        do {
+            try containerView.parseAccessibility()
+        } catch ImageRenderingError.containedViewExceedsMaximumSize {
+            fatalError(
+                """
+                View is too large to render monochrome snapshot. Try setting useMonochromeSnapshot to false or \
+                use a different iOS version. In particular, this is known to fail on iOS 13, but was fixed in \
+                iOS 14.
+                """
+            )
+        } catch ImageRenderingError.containedViewHasUnsupportedTransform {
+            fatalError(
+                """
+                View has an unsupported transform for the specified snapshot parameters. Try using an identity \
+                transform or changing the view rendering mode to render the layer in the graphics context.
+                """
+            )
+        } catch {
+            fatalError("Failed to render snapshot image")
         }
+
+        containerView.sizeToFit()
+        containerView.setNeedsLayout()
+        containerView.layoutIfNeeded()
+        CATransaction.flush()
+
+        let renderer = UIGraphicsImageRenderer(bounds: containerView.bounds)
+        let image = renderer.image { context in
+            if drawHierarchyInKeyWindow {
+                containerView.drawHierarchy(in: containerView.bounds, afterScreenUpdates: true)
+            } else {
+                containerView.layer.render(in: context.cgContext)
+            }
+        }
+
+        completion(image)
     }
 
     private func beginCapture(of containerView: UIView) {
