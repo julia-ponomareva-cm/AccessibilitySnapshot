@@ -1,5 +1,6 @@
 import AccessibilitySnapshot
 import SnapshotTesting
+import SwiftUI
 import XCTest
 
 @testable import AccessibilitySnapshotDemo
@@ -158,6 +159,49 @@ final class SnapshotTestingTests: XCTestCase {
             as: .accessibilityImage,
             named: nameForDevice()
         )
+    }
+
+    func testConcurrentAccessibilitySnapshotsComplete() {
+        let snapshotCount = 40
+        let snapshotsComplete = expectation(description: "All accessibility snapshots complete")
+        snapshotsComplete.expectedFulfillmentCount = snapshotCount
+
+        for index in 0 ..< snapshotCount {
+            let button = UIButton(type: .system)
+            button.frame = CGRect(x: 0, y: 0, width: 240, height: 44)
+            button.setTitle("Button \(index)", for: .normal)
+
+            Snapshotting<UIView, UIImage>
+                .accessibilityImage(shouldRunInHostApplication: false)
+                .snapshot(button)
+                .run { image in
+                    XCTAssertGreaterThan(image.size.height, button.bounds.height)
+                    snapshotsComplete.fulfill()
+                }
+        }
+
+        wait(for: [snapshotsComplete], timeout: 5)
+    }
+
+    func testSwiftUIMenuPublishesAccessibilityBeforeSnapshot() {
+        let hostingController = UIHostingController(
+            rootView: Menu("All Tickets") {
+                Button("Bus ticket") {}
+            }
+            .frame(width: 240, height: 44)
+        )
+        hostingController.view.frame = CGRect(x: 0, y: 0, width: 240, height: 44)
+
+        let snapshotComplete = expectation(description: "SwiftUI Menu accessibility snapshot completes")
+        Snapshotting<UIView, UIImage>
+            .accessibilityImage(shouldRunInHostApplication: false)
+            .snapshot(hostingController.view)
+            .run { image in
+                XCTAssertGreaterThan(image.size.height, hostingController.view.bounds.height)
+                snapshotComplete.fulfill()
+            }
+
+        wait(for: [snapshotComplete], timeout: 5)
     }
 
     // MARK: - Private Methods
