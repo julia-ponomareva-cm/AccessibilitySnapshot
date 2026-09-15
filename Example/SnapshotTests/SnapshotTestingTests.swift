@@ -183,6 +183,24 @@ final class SnapshotTestingTests: XCTestCase {
         wait(for: [snapshotsComplete], timeout: 5)
     }
 
+    @MainActor
+    func testMainActorAccessibilitySnapshotCompletes() {
+        let button = UIButton(type: .system)
+        button.frame = CGRect(x: 0, y: 0, width: 240, height: 44)
+        button.setTitle("Main actor button", for: .normal)
+
+        let snapshotComplete = expectation(description: "Main actor accessibility snapshot completes")
+        Snapshotting<UIView, UIImage>
+            .accessibilityImage(shouldRunInHostApplication: false)
+            .snapshot(button)
+            .run { image in
+                XCTAssertGreaterThan(image.size.height, button.bounds.height)
+                snapshotComplete.fulfill()
+            }
+
+        wait(for: [snapshotComplete], timeout: 5)
+    }
+
     func testSwiftUIMenuPublishesAccessibilityBeforeSnapshot() {
         let hostingController = UIHostingController(
             rootView: Menu("All Tickets") {

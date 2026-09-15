@@ -152,8 +152,7 @@ public extension Snapshotting where Value == UIView, Format == UIImage {
             diffing: imageSnapshotting.diffing
         ) { view in
             Async { callback in
-                // SnapshotTesting's callback transform is nonisolated, while UIKit capture must run on the main actor.
-                Task { @MainActor in
+                let beginCapture: @MainActor () -> Void = {
                     let configuration = AccessibilitySnapshotConfiguration(
                         viewRenderingMode: drawHierarchyInKeyWindow ? .drawHierarchyInRect : .renderLayerInContext,
                         colorRenderingMode: useMonochromeSnapshot ? .monochrome : .fullColor,
@@ -186,6 +185,14 @@ public extension Snapshotting where Value == UIView, Format == UIImage {
                         drawHierarchyInKeyWindow: drawHierarchyInKeyWindow,
                         completion: callback
                     )
+                }
+
+                // SnapshotTesting synchronously waits for the callback. Starting a Task from an @MainActor test would
+                // deadlock behind that wait, so enter the actor immediately when already on its backing thread.
+                if Thread.isMainThread {
+                    MainActor.assumeIsolated(beginCapture)
+                } else {
+                    DispatchQueue.main.async(execute: beginCapture)
                 }
             }
         }
